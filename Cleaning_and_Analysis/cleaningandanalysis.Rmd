@@ -225,6 +225,64 @@ DT::datatable(master)
 
 ##(a)記述統計  
 
+```{r}
+#1.NAの数を数える
+na.count <- sapply(master, function(x) sum(is.na(x)))
+print(na.count)
+```
+
+```{r}
+str(master)
+```
+
+```{r}
+#データをnum型に変換しておく
+master <- master %>% mutate(across(-all_of("instnm"), ~ as.numeric(.)))
+```
+
+
+
+
+```{r}
+#3.４年卒業率の平均推移を図示
+
+# 年ごとの平均値を計算
+df_mean <- master %>%
+  group_by(year) %>%
+  summarise(mean_totgradrate4yr = mean(totgradrate4yr, na.rm = TRUE))
+
+# 折れ線グラフを作成
+ggplot(df_mean, aes(x = year, y = mean_totgradrate4yr)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "年ごとの４年卒業率の平均値の推移",
+    x = "Year",
+    y = "Mean of Column totgradrate4yr"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+#3.semester導入率の推移を図示
+
+# 年ごとの導入率を計算
+df_share <- master %>%
+  group_by(year) %>%
+  summarise(share_sem = sum(semester == 1, na.rm = TRUE) / n())
+
+# 折れ線グラフを作成
+ggplot(df_share, aes(x = year, y = share_sem)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "年ごとのsemester導入率の推移",
+    x = "Year",
+    y = "Mean of Column totgradrate4yr"
+  ) +
+  theme_minimal()
+```
+
 
 ##(b)回帰分析  
 ```{r}
@@ -232,7 +290,7 @@ model <- lm(totgradrate4yr ~ after, data=master)
 ```
 
 ```{r}
-stargazer(model)
+stargazer(model, type = "text")
 ```
 
 
