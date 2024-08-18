@@ -1,0 +1,242 @@
+---
+title: "RA warmup"
+author: "Kiyotaka NASU"
+date: "2024-08-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(purrr)
+library(stringr)
+library(stargazer)
+```
+
+#データ整理と変換  
+
+
+##(a)Semester Dataの整形
+
+```{r}
+#csvファイルの読み込み。デフォルトで一行目が列名として扱われる。
+semester1 <- read_csv("semester_data_1.csv")
+semester2 <- read_csv("semester_data_2.csv")
+```
+
+```{r}
+#列ごとの型を確認する。1と2で型が違うため揃える必要があると判断。
+str(semester1)
+str(semester2)
+```
+
+```{r}
+#型を揃える。character型に統一したほうが良いと判断。
+semester2 <- semester2 %>% mutate(across(-x2, as.character))
+```
+
+```{r}
+#結合。
+semester_bind <- bind_rows(semester1,semester2)
+```
+
+
+```{r}
+#一行目を取り除き、二行目を列名にする。
+semester_bind <- semester_bind %>%
+  slice(-1) %>%
+  set_names(as.character(semester_bind[1, ]))
+```
+
+
+```{r}
+#Y列を削除。
+semester_bind <- semester_bind %>% select(-c("Y"))
+```
+
+
+```{r}
+# semester制が導入された年の列を作成
+semester_bind <- semester_bind %>%
+  group_by(unitid) %>% 
+  mutate(
+    yearsem = ifelse(
+      any(semester == 0) & any(semester == 1),
+      unique(year[semester == 1 & lag(semester) == 0]),
+      NA
+    )
+  ) %>%
+  ungroup()
+```
+
+```{r}
+#semester制導入後を示すafter列を作成
+semester_bind <- semester_bind %>% 
+  mutate(
+    after = ifelse(
+      year >= yearsem,
+      1,
+      0
+    )
+  )
+```
+
+```{r}
+DT::datatable(semester_bind)
+```
+
+## (b)Gradrate Dataの整形
+
+```{r}
+#1994年以外の年の.xlsファイルがあるため、paste0()でディレクトリをまとめてしまう
+available_years <- setdiff(1991:2014, c(1994))
+file_paths <- paste0("C:/Users/nasuk/OneDrive/デスクトップ/ra_bootcamp_warmp/", available_years, ".xlsx")
+```
+
+```{r}
+#まとめたディレクトリを用いて、一度に結合する
+gradrate_bind <- file_paths %>%
+  map(~ read_excel(.x)) %>%
+  bind_rows()
+```
+
+```{r}
+#女子学生の4年卒業率に0.01をかけて、0から1のスケールに変更
+gradrate_bind <- gradrate_bind %>%
+  mutate(womengradrate4yr = women_gradrate_4yr * 0.01)
+```
+
+```{r}
+#データ型を確認。num型に揃える必要があるため、変換する。
+str(gradrate_bind)
+gradrate_bind <- gradrate_bind %>% 
+  mutate(
+    totcohortsize = as.numeric(totcohortsize), 
+    m_4yrgrads = as.numeric(m_4yrgrads)
+  )
+```
+
+```{r}
+#男性と全体の卒業率を計算
+gradrate_bind <- gradrate_bind %>%
+  mutate(totgradrate4yr = tot4yrgrads / totcohortsize)
+  
+gradrate_bind <- gradrate_bind %>%
+  mutate(mengradrate4yr = m_4yrgrads / m_cohortsize)
+```
+
+
+```{r}
+#有効数字３桁を指定。DTで見るとところどころ有効係数が変わっているようにも見えるが…
+gradrate_bind <- gradrate_bind %>%
+  mutate(
+    totgradrate4yr = sprintf("%.3g", totgradrate4yr),
+    mengradrate4yr = sprintf("%.3g", mengradrate4yr)
+  )
+```
+
+```{r}
+#2010年までの行のみ抽出
+gradrate_bind <- gradrate_bind %>%
+  filter(year <= 2010)
+```
+
+
+  
+
+```{r}
+DT::datatable(gradrate_bind)
+```
+
+##(c)Covariates Dataの整形
+
+```{r}
+#生データ読み込み
+covariates <- read_excel("C:/Users/nasuk/OneDrive/デスクトップ/ra_bootcamp_warmp/covariates.xlsx")
+```
+
+```{r}
+#列名の変更
+covariates <- covariates %>% rename(unitid = university_id)
+```
+
+```{r}
+#"aaaa"の削除
+covariates$unitid <- covariates$unitid %>% str_remove_all("aaaa")
+```
+
+```{r}
+#wide型に変換
+covariates <- covariates %>% pivot_wider(names_from = category, values_from = value)
+```
+
+outcome 1991-2016 1994なし　1991-2010にフィルター
+semester 1991-2010
+
+```{r}
+#年の範囲を揃える
+covariates <- covariates %>% filter(year>=1991, year<=2010, year != 1994)
+```
+
+```{r}
+#gradrateにおけるunitidの一覧を作る
+unitids_vector <- unique(gradrate_bind$unitid)
+```
+
+```{r}
+#gradrateと一致するunitidのみ抽出
+covariates <- covariates %>% filter(unitid %in% unitids_vector)
+```
+
+```{r}
+DT::datatable(covariates)
+```
+
+```{r}
+#列の結合に用いるunitidとyearの型が一致せず。gradrate_bindのみnumなのでcharに揃える。
+str(semester_bind)
+str(gradrate_bind)
+str(covariates)
+
+gradrate_bind <- gradrate_bind %>% 
+  mutate(
+    unitid = as.character(unitid),
+    year = as.character(year)
+  )
+```
+
+```{r}
+#unitidとyearで結合してマスターデータ作成
+master <- semester_bind %>%
+  left_join(gradrate_bind, by =c("unitid","year")) %>%
+  left_join(covariates, by =c("unitid","year") )
+```
+
+```{r}
+DT::datatable(master)
+```
+
+
+#分析
+
+##(a)記述統計  
+
+
+##(b)回帰分析  
+```{r}
+model <- lm(totgradrate4yr ~ after, data=master)
+```
+
+```{r}
+stargazer(model)
+```
+
+
+
+
+
+
